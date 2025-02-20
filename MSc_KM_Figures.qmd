@@ -1,0 +1,873 @@
+---
+title: "MSc_KM_Figures"
+author: "Kim Menard"
+date: "`r Sys.Date()`"
+format:
+  html:
+    toc: true
+    toc-depth: 6
+    toc-location: left
+    number-sections: false
+    theme: united
+    highlight-style: tango
+    self-contained: false
+editor:
+  output: visual
+---
+
+# Load the packages
+
+```{r, error = FALSE, warning = FALSE, message = FALSE}
+
+library(dplyr) ; library(broom.mixed) ; library(lme4) ; library(performance) ; library(scales) ; library(ggcorrplot) ; library(emmeans) ; library(ggplot2) ; library(multcomp) ; library(cmdstanr) ; library(readr)
+```
+
+# Data Frames
+
+```{r}
+# Load the csv file
+KM_full_df <- read.csv2("dataset_MenardK_MasterSc.csv", na="NA")
+
+# Adapt the columns format that we want to use, which are not in the correct format
+KM_full_df$Year <- as.factor(KM_full_df$Year)
+KM_full_df$Temp <- as.factor(KM_full_df$Temp)
+KM_full_df$ID <- as.factor(KM_full_df$ID)
+KM_full_df$Treatment <- as.factor(KM_full_df$Treatment)
+KM_full_df$Treatmentord <- factor(KM_full_df$Treatment, order = TRUE,
+                                  levels = c("8W4B", "8W8B", "12W4B", "12W8B"))
+KM_full_df$W_TBrood <- as.numeric(KM_full_df$W_TBrood)
+KM_full_df$Strength <- as.numeric(KM_full_df$Strength)
+KM_full_df$Pollen_Hive <- as.numeric(KM_full_df$Pollen_Hive)
+KM_full_df$T_W <- as.numeric(KM_full_df$T_W)
+KM_full_df$T_B <- as.numeric(KM_full_df$T_B)
+
+# Date formating issues
+KM_full_df$Date <- as.Date(KM_full_df$Date)
+KM_full_df <- KM_full_df %>%
+  mutate(Date = format(Date, "%Y-%m-%d"))  # Convert from d/m/Y to Y-m-d
+
+# Scale the Pollen_TAP variable per hour
+KM_full_df$Pollen_TAPS <- KM_full_df$Pollen_TAP/KM_full_df$TAP_Hour
+```
+
+Make a df for each year with the X and Y variables
+
+```{r}
+# Make a df for each year with the X and Y variables
+## E22
+E22 <- filter(KM_full_df[,c("Year", "Temp", "Date", "Treatment", "ID", "W_TBrood",
+                            "Strength", "Pollen_Hive")], Year == "2022")
+
+### Adjust E22 and add ratios
+E22 <- subset(E22, # so that we don't consider the colonies with measurment error
+                (ID != "121" & ID != "356" & ID != "463"))        
+
+E22 <- mutate(E22, 
+              ratioPS = Pollen_Hive/Strength,
+              ratioPB = Pollen_Hive/W_TBrood)
+
+E22[,c("ratioPS")][is.infinite(E22[,c("ratioPS")])] <- 0
+E22[,c("ratioPB")][is.infinite(E22[,c("ratioPB")])] <- 0
+E22[,c("ratioPB")][is.na(E22[,c("ratioPB")])] <- 0
+
+## E23
+E23 <- filter(KM_full_df[,c("Year", "Temp", "Date", "Treatment", "Treatmentord",
+                            "ID", "T_W","T_B", "W_TBrood", "Strength",
+                            "Pollen_Hive", "Pollen_TAPS",
+                            "Gain_cml_norm", "Out_30s")],
+              Year == "2023")
+
+### df for PTE
+E23_PTE <- E23 %>%
+  filter(!(ID == 110 & Date == "2023-07-18"))
+
+### df for the blueberry pollination period (BP)
+E23_BP <- na.omit(E23[24:92,]) # t1 to t3
+
+### df for the blueberry pollination period with the extra July (J) sampling
+E23_J <- E23 %>%
+  filter(Date != "2023-06-01" &
+                          !(ID == 110 & Date == "2023-07-18"))
+```
+
+# Create a visual representation of the model
+
+## For 2022
+
+```{r}
+# W22
+E22W <- data.frame(
+  label=c("a","b",
+          "a","b",
+          "a","b",
+          "a","b"),
+  Treatment=c("Absence", "Presence",
+              "Absence", "Presence",
+              "Absence", "Presence",
+              "Absence", "Presence"),
+  x=c("2022-06-13", "2022-06-13",
+      "2022-06-20", "2022-06-20",
+      "2022-06-29", "2022-06-29",
+      "2022-07-26", "2022-07-26"),
+  y=c(25000, 25000,
+      32000, 32000,
+      40000, 40000,
+      45000, 45000))
+
+Fig.1.A <- ggplot(E22, aes(x=Date, y=Strength, col = Treatment)) +
+  theme_classic() +
+  geom_boxplot(outlier.shape = NA, linewidth = 0.8) +
+  geom_vline(xintercept = 3.5, colour = "#8D2012", linetype = 2) +
+  geom_point(position=position_jitterdodge(), size = 2)  +
+  scale_y_continuous(labels = comma,
+                     breaks = seq(0,55000,10000), limits = c(0, 55000)) +
+  labs(x = "Date",
+       y = "Worker population\n(number of workers)",
+       tag = "A)") +
+  scale_color_manual(name="Group", labels=c("IBA", "IBP"),
+                     values=c("firebrick4", "dodgerblue4")) +
+  theme(axis.title = element_text(size = 5),
+        axis.text = element_text(size = 5),
+        axis.text.x = element_text(angle = 20, hjust = 1),
+        legend.title = element_text(size = 5),
+        legend.text = element_text(size = 5)) + 
+  geom_text(data=E22W,
+            mapping=aes(x=x, y=y, label=label, col = Treatment, col = "black"),
+            size = 5, position = position_dodge(width = 0.75))
+
+# B22
+E22B <- data.frame(
+  label=c("a","b",
+          "a","b",
+          "a","b",
+          "",""),
+  Treatment=c("Absence", "Presence",
+              "Absence", "Presence",
+              "Absence", "Presence",
+              "Absence", "Presence"),
+  x=c("2022-06-13", "2022-06-13",
+      "2022-06-20", "2022-06-20",
+      "2022-06-29", "2022-06-29",
+      "2022-07-26", "2022-07-26"),
+  y=c(32000, 32000,
+      40000, 40000,
+      41000, 41000,
+      46000, 46000))
+
+Fig.1.B <- ggplot(E22, aes(x = Date, y = W_TBrood, colour = Treatment)) +
+  theme_classic() +
+  geom_boxplot(outlier.shape = NA, linewidth = 0.8) +
+  geom_vline(xintercept = 3.5, colour = "#8D2012", linetype = 2) +
+  geom_point(position=position_jitterdodge(), size = 2) +
+    scale_y_continuous(labels = comma,
+                     breaks = seq(0,55000,10000), limits = c(0, 55000)) + 
+  labs(x = "Date",
+       y = "Brood population\n(number of brood cells)",
+       tag= "B)") +
+  scale_color_manual(name="Group", labels=c("IBA", "IBP"),
+                     values=c("firebrick4", "dodgerblue4")) +
+  theme(axis.title = element_text(size = 5),
+        axis.text = element_text(size = 5),
+        axis.text.x = element_text(angle = 20, hjust = 1),
+        legend.title = element_text(size = 5),
+        legend.text = element_text(size = 5)) + 
+  geom_text(data=E22B,
+            mapping=aes(x=x, y=y, label=label, col = Treatment, col = "black"),
+            size = 5, position = position_dodge(width = 0.75))
+
+# PH22
+E22P <- data.frame(
+  label=c("a","b",
+          "","",
+          "a","b",
+          "a","b"),
+  Treatment=c("Absence", "Presence",
+              "Absence", "Presence",
+              "Absence", "Presence",
+              "Absence", "Presence"),
+  x=c("2022-06-13", "2022-06-13",
+      "2022-06-20", "2022-06-20",
+      "2022-06-29", "2022-06-29",
+      "2022-07-26", "2022-07-26"),
+  y=c(10000, 10000,
+      10000, 10000,
+      13000, 13000,
+      18000, 18000))
+
+Fig.1.C <- ggplot(E22, aes(x = Date, y = Pollen_Hive, colour = Treatment)) +
+  theme_classic() +
+  geom_boxplot(outlier.shape = NA, linewidth = 0.8) +
+  geom_vline(xintercept = 3.5, colour = "#8D2012", linetype = 2) +
+  geom_point(position=position_jitterdodge(), size = 2) +
+  labs(x = "Date",
+       y = "Colony pollen stores\n(number of pollen cells)",
+       tag = "C)") +
+  scale_color_manual(name="Group", labels=c("IBA", "IBP"),
+                     values=c("firebrick4", "dodgerblue4")) +
+  theme(axis.title = element_text(size = 5),
+        axis.text = element_text(size = 5),
+        axis.text.x = element_text(angle = 20, hjust = 1),
+        legend.title = element_text(size = 5),
+        legend.text = element_text(size = 5)) + 
+  geom_text(data=E22P,
+            mapping=aes(x=x, y=y, label=label, col = Treatment, col = "black"),
+            size = 5, position = position_dodge(width = 0.75))
+
+# PW22
+E22PW <- data.frame(
+  label=c("","",
+          "a","b",
+          "a","b",
+          "",""),
+  Treatment=c("Absence", "Presence",
+              "Absence", "Presence",
+              "Absence", "Presence",
+              "Absence", "Presence"),
+  x=c("2022-06-13", "2022-06-13",
+      "2022-06-20", "2022-06-20",
+      "2022-06-29", "2022-06-29",
+      "2022-07-26", "2022-07-26"),
+  y=c(1, 1,
+      1, 1,
+      1.8, 1.8,
+      1, 1))
+
+Fig.1.D <- ggplot(E22, aes(x = Date, y = ratioPS, colour = Treatment)) +
+  theme_classic() +
+  geom_boxplot(outlier.shape = NA, linewidth = 0.8) +
+  geom_vline(xintercept = 3.5, colour = "#8D2012", linetype = 2) +
+  geom_point(position=position_jitterdodge(), size = 2) +
+  labs(x = "Date",
+       y = "Colony pollen stores per worker\n(pollen cells / worker)",
+       tag = "D)") +
+  scale_color_manual(name="Group", labels=c("IBA", "IBP"),
+                     values=c("firebrick4", "dodgerblue4")) +
+    scale_y_continuous(labels = comma) +
+  scale_color_manual(name="Group", labels=c("IBA", "IBP"),
+                     values=c("firebrick4", "dodgerblue4")) +
+  theme(axis.title = element_text(size = 5),
+        axis.text = element_text(size = 5),
+        axis.text.x = element_text(angle = 20, hjust = 1),
+        legend.title = element_text(size = 5),
+        legend.text = element_text(size = 5)) + 
+  geom_text(data=E22PW,
+            mapping=aes(x=x, y=y, label=label, col = Treatment, col = "black"),
+            size = 5, position = position_dodge(width = 0.75))
+
+# PB22
+E22PB <- data.frame(
+  label=c("a","b",
+          "a","b",
+          "","",
+          "a","b"),
+  Treatment=c("Absence", "Presence",
+              "Absence", "Presence",
+              "Absence", "Presence",
+              "Absence", "Presence"),
+  x=c("2022-06-13", "2022-06-13",
+      "2022-06-20", "2022-06-20",
+      "2022-06-29", "2022-06-29",
+      "2022-07-26", "2022-07-26"),
+  y=c(.63, .63,
+      .63, .63,
+      .63, .63,
+      .63, .63))
+
+Fig.1.E <- ggplot(E22, aes(x = Date, y = ratioPB, colour = Treatment)) +
+  theme_classic() +
+  geom_boxplot(outlier.shape = NA, linewidth = 0.8) +
+  geom_vline(xintercept = 3.5, colour = "#8D2012", linetype = 2) +
+  geom_point(position=position_jitterdodge(), size = 2) +
+  labs(x = "Date",
+       y = "Colony pollen stores per brood\n(pollen cells / brood cell)",
+       tag= "E)") +
+  scale_color_manual(name="Group", labels=c("IBA", "IBP"),
+                     values=c("firebrick4", "dodgerblue4")) +
+    scale_y_continuous(labels = comma) +
+  theme(axis.title = element_text(size = 5),
+        axis.text = element_text(size = 5),
+        axis.text.x = element_text(angle = 20, hjust = 1),
+        legend.title = element_text(size = 5),
+        legend.text = element_text(size = 5)) + 
+  geom_text(data=E22PB,
+            mapping=aes(x=x, y=y, label=label, col = Treatment, col = "black"),
+            size = 5, position = position_dodge(width = 0.75))
+```
+
+## For 2023 PTE
+
+```{r}
+# W23
+E23Str <- data.frame(
+  label=c("b","b","a","a",
+          "ab","b","a","b",
+          "b","c","a","bc",
+          "a","ab","a","b",
+          "","","",""),
+  Treatment=c("8A4C","8A8C","12A4C","12A8C",
+                 "8A4C","8A8C","12A4C","12A8C",
+                 "8A4C","8A8C","12A4C","12A8C",
+                 "8A4C","8A8C","12A4C","12A8C",
+                 "8A4C","8A8C","12A4C","12A8C"),
+  x=c("2023-06-01", "2023-06-01", "2023-06-01", "2023-06-01",
+      "2023-06-08", "2023-06-08", "2023-06-08", "2023-06-08",
+      "2023-06-15", "2023-06-15", "2023-06-15", "2023-06-15",
+      "2023-06-22", "2023-06-22", "2023-06-22", "2023-06-22",
+      "2023-07-18", "2023-07-18", "2023-07-18", "2023-07-18"),
+  y=c(17000,17000,17000,17000,
+      25000,25000,25000,25000,
+      27000,27000,27000,27000,
+      27000,27000,27000,27000,
+      38000,38000,38000,38000))
+
+Fig.2.A <- ggplot(E23_PTE, aes(x=Date, y=Strength, col = Treatmentord)) +
+  labs(x = "Date",
+       y = "Worker population\n(number of workers)",
+       tag= "A)") +
+  scale_color_manual(name="Group", labels=c("8W4B", "8W8B", "12W4B", "12W8B"),
+                     values=c("#B7950b", "#6c3483", "#1d771d", "#b71c1c")) + 
+  theme_classic() +
+  geom_boxplot(outlier.shape = NA,linewidth = 0.8) +
+  geom_point(position=position_jitterdodge(), size = 2) +
+  theme(axis.title = element_text(size = 5),
+        axis.text = element_text(size = 5),
+                axis.text.x = element_text(angle = 20, hjust = 1),
+        legend.title = element_text(size = 5),
+        legend.text = element_text(size = 5)) +  
+  scale_y_continuous(labels = comma,
+                     breaks = seq(0,45000,10000), limits = c(0, 45000)) +  
+  geom_vline(xintercept = 4.5, colour = "#8D2012", linetype = 2) +
+  geom_text(data=E23Str,
+            mapping=aes(x=x, y=y, label=label, col = Treatment, col = "black"),
+            size = 5,  position = position_dodge(width = 0.9))
+
+# B23
+E23TBr <- data.frame(
+  label=c("a","b","a","b",
+          "a","b","a","b",
+          "","","","",
+          "","","","",
+          "","","",""),
+  Treatment=c("8A4C","8A8C","12A4C","12A8C",
+                 "8A4C","8A8C","12A4C","12A8C",
+                 "8A4C","8A8C","12A4C","12A8C",
+                 "8A4C","8A8C","12A4C","12A8C",
+                 "8A4C","8A8C","12A4C","12A8C"),
+  x=c("2023-06-01", "2023-06-01", "2023-06-01", "2023-06-01",
+      "2023-06-08", "2023-06-08", "2023-06-08", "2023-06-08",
+      "2023-06-15", "2023-06-15", "2023-06-15", "2023-06-15",
+      "2023-06-22", "2023-06-22", "2023-06-22", "2023-06-22",
+      "2023-07-18", "2023-07-18", "2023-07-18", "2023-07-18"),
+  y=c(29000,29000,29000,29000,
+      32000,32000,32000,32000,
+      35000,35000,35000,35000,
+      40500,40500,40500,40500,
+      40000,40000,40000,40000))
+
+Fig.2.B <- ggplot(E23_PTE, aes(x=Date, y=W_TBrood, col = Treatmentord)) +
+  labs(x = "Date",
+       y = "Brood population\n(number of brood cells)",
+       tag= "B)") +
+  scale_color_manual(name="Group", labels=c("8W4B", "8W8B", "12W4B", "12W8B"),
+                     values=c("#B7950b", "#6c3483", "#1d771d", "#b71c1c")) + 
+  theme_classic() +
+  geom_boxplot(outlier.shape = NA,linewidth = 0.8) +
+  geom_point(position=position_jitterdodge(), size = 2) +
+  theme(axis.title = element_text(size = 5),
+        axis.text = element_text(size = 5),
+                axis.text.x = element_text(angle = 20, hjust = 1),
+        legend.title = element_text(size = 5),
+        legend.text = element_text(size = 5)) +  
+  scale_y_continuous(labels = comma,
+                     breaks = seq(0,45000,10000), limits = c(0, 45000)) +  
+  geom_vline(xintercept = 4.5, colour = "#8D2012", linetype = 2) +
+  geom_text(data=E23TBr,
+            mapping=aes(x=x, y=y, label=label, col = Treatment, col = "black"),
+            size = 5,  position = position_dodge(width = 0.9))
+```
+
+## For 2023 FAE
+
+```{r}
+# PH23
+Fig.3.A <- ggplot(E23_BP, aes(x=Date, y=Pollen_Hive, col = Treatmentord)) +
+  scale_y_continuous(labels = comma, breaks=seq(0,15000,4000)) +
+  labs(x = "Date",
+       y = "Colony pollen stores (number of pollen cells)",
+       tag= "A)") +
+  scale_color_manual(name="Group", labels=c("8W4B", "8W8B", "12W4B", "12W8B"),
+                     values=c("#B7950b", "#6c3483", "#1d771d", "#b71c1c")) + 
+  theme_classic() +
+  geom_boxplot(outlier.shape = NA,linewidth = 0.3) +
+  geom_point(position=position_jitterdodge(), size = .3) +
+  theme(text = element_text(size = 7),
+        axis.text = element_text(size = 7),
+        axis.title = element_text(size = 7),
+        axis.text.x = element_text(angle = 20, hjust = 1))
+
+# TAP23
+E23TAP <- data.frame(
+  label=c("","","","",
+          "b","b","a","b",
+          "ab","b","a","b"),
+  Treatment=c("8A4C","8A8C","12A4C","12A8C",
+              "8A4C","8A8C","12A4C","12A8C",
+              "8A4C","8A8C","12A4C","12A8C"),
+  x=c("2023-06-08", "2023-06-08", "2023-06-08", "2023-06-08",
+      "2023-06-15", "2023-06-15", "2023-06-15", "2023-06-15",
+      "2023-06-22", "2023-06-22", "2023-06-22", "2023-06-22"),
+  y=c(2.5,2.5,2.5,2.5,
+      2.5,2.5,2.5,2.5,
+      5,5,5,5))
+
+Fig.3.B <- ggplot(E23_BP, aes(x=Date, y=Pollen_TAPS, col = Treatmentord)) +
+  scale_y_continuous(breaks = seq(0,6,1.5)) +
+  labs(x = "Date",
+       y = "Trapped pollen\n(g/h)",
+       tag= "B)") +
+  scale_color_manual(name="Group", labels=c("8W4B", "8W8B", "12W4B", "12W8B"),
+                     values=c("#B7950b", "#6c3483", "#1d771d", "#b71c1c")) + 
+  theme_classic() +
+  geom_boxplot(outlier.shape = NA,linewidth = 0.8) +
+  geom_point(position=position_jitterdodge(), size = 2) +
+  geom_text(data=E23TAP,
+            mapping=aes(x=x, y=y, label=label, col = Treatment, 
+          color = "black"),
+            size = 5,  position = position_dodge(width = 1))
+
+# O23
+E23OUT <- data.frame(
+  label=c("","","","",
+          "ab","c","a","bc",
+          "ab","b","a","ab"),
+  Treatment=c("8A4C","8A8C","12A4C","12A8C",
+              "8A4C","8A8C","12A4C","12A8C",
+              "8A4C","8A8C","12A4C","12A8C"),
+  x=c("2023-06-08", "2023-06-08", "2023-06-08", "2023-06-08",
+      "2023-06-15", "2023-06-15", "2023-06-15", "2023-06-15",
+      "2023-06-22", "2023-06-22", "2023-06-22", "2023-06-22"),
+  y=c(60,60,60,60,
+      70,70,70,70,
+      80,80,80,80))
+
+Fig.3.C <- ggplot(E23_BP, aes(x=Date, y=Out_30s, col = Treatmentord)) +
+  labs(x = "Date",
+       y = "Departing foragers\n(number of workers)",
+       tag= "C)") +
+  scale_color_manual(name="Group", labels=c("8W4B", "8W8B", "12W4B", "12W8B"),
+                     values=c("#B7950b", "#6c3483", "#1d771d", "#b71c1c")) + 
+  theme_classic() +
+  geom_boxplot(outlier.shape = NA,linewidth = 0.8) +
+  geom_point(position=position_jitterdodge(), size = 2) +
+  theme(axis.title = element_text(size = 5),
+        axis.text = element_text(size = 5),
+                axis.text.x = element_text(angle = 20, hjust = 1),
+        legend.title = element_text(size = 5),
+        legend.text = element_text(size = 5)) + 
+  geom_text(data=E23OUT,
+            mapping=aes(x=x, y=y, label=label, col = Treatment, 
+          color = "black"),
+            size = 5,  position = position_dodge(width = 0.9))
+
+# GN23
+E23CN <- data.frame(
+  label=c("","","","",
+          "","","","",
+          "","","","",
+          "ab","ab","a","b"),
+  Treatment=c("8A4C","8A8C","12A4C","12A8C",
+              "8A4C","8A8C","12A4C","12A8C",
+              "8A4C","8A8C","12A4C","12A8C",
+              "8A4C","8A8C","12A4C","12A8C"),
+  x=c("2023-06-08", "2023-06-08", "2023-06-08", "2023-06-08",
+      "2023-06-15", "2023-06-15", "2023-06-15", "2023-06-15",
+      "2023-06-22", "2023-06-22", "2023-06-22", "2023-06-22",
+      "2023-07-18", "2023-07-18", "2023-07-18", "2023-07-18"),
+  y=c(0,0,0,0,
+      0,0,0,0,
+      0,0,0,0,
+      25.5,25.5,25.5,25.5))
+
+Fig.3.D <- ggplot(E23_J, aes(x=Date, y=Gain_cml_norm, col = Treatmentord)) +
+  labs(x = "Date",
+       y = "Weight gain (kg)",
+       tag= "D)") +
+  scale_color_manual(name="Group", labels=c("8W4B", "8W8B", "12W4B", "12W8B"),
+                     values=c("#B7950b", "#6c3483", "#1d771d", "#b71c1c")) + 
+  theme_classic() +
+  geom_boxplot(outlier.shape = NA,linewidth = 0.8) +
+  geom_point(position=position_jitterdodge(), size = 2) +
+  theme(axis.title = element_text(size = 5),
+        axis.text = element_text(size = 5),
+        axis.text.x = element_text(angle = 20, hjust = 1),
+        legend.title = element_text(size = 5),
+        legend.text = element_text(size = 5)) +  
+  geom_vline(xintercept = 3.5, colour = "#8D2012", linetype = 2) +
+  geom_hline(yintercept = 0, colour = "#8D2012", linetype = 3) +
+  geom_text(data=E23CN,
+            mapping=aes(x=x, y=y, label=label, col=Treatment, col="black"),
+            size = 5,  position = position_dodge(width = 1))
+```
+
+# Predictions
+
+## Loading the desired grid
+
+```{r}
+# center
+## find the mean of Xs
+meanStrBP <- mean(E23_BP$Strength)
+meanWbrBP <- mean(E23_BP$W_TBrood)
+
+## find the sd of Xs
+sdStrBP <- sd(E23_BP$Strength)
+sdWbrBP <- sd(E23_BP$W_TBrood)
+
+## substract mean and divide by sd
+E23_BP$Strc <- (E23_BP$Strength - meanStrBP)/sdStrBP
+E23_BP$Wbrc <- (E23_BP$W_TBrood - meanWbrBP)/sdWbrBP
+
+# make the grid with those data
+grid_points <- modelr::data_grid(E23_BP, 
+                                 Wbrc = modelr::seq_range(Wbrc, by = .2),
+                                 Strc = modelr::seq_range(Strc, by = .2))
+grid_points |> 
+  ggplot(aes(x = Wbrc, y = Strc)) + 
+  geom_point() + 
+  coord_fixed()
+
+# log
+E23_BP$logTAPS <- log(E23_BP$Pollen_TAPS)
+E23_BP$logOut <- log(E23_BP$Out_30s)
+
+# center
+## find the mean of Xs
+meanlTAPS <- mean(E23_BP$logTAPS)
+meanlOut <- mean(E23_BP$logOut)
+
+## find the sd of Xs
+sdlTAPS <- sd(E23_BP$logTAPS)
+sdlOut <- sd(E23_BP$logOut)
+
+## substract mean and divide by sd
+lTAPSc <- (E23_BP$logTAPS - meanlTAPS)/sdlTAPS
+lOutc <- (E23_BP$logOut - meanlOut)/sdlOut
+```
+
+### Extract the stan files
+
+For Pollen_TAPS
+
+```{r, eval = FALSE}
+RSM_pred <- cmdstan_model(stan_file = "MSc_KM_RSM_pred.stan")
+
+## sample (MCMC)
+RSM_pred_splPT <- RSM_pred$sample(
+  data = list(N = length(E23_BP$logTAPS) + nrow(grid_points),
+              Nobs = length(E23_BP$logTAPS),
+              x = bind_rows(E23_BP[c("Wbrc", "Strc")], grid_points),
+              z = E23_BP$logTAPS),
+  chains = 4, parallel_chains = 4, refresh = 500)
+
+RSM_pred_splPT$save_object("RSM_pred_splPT.rds")
+#### shinystan::launch_shinystan(RSM_pred_spl)
+```
+
+For Out_30s
+
+```{r, eval = FALSE}
+# sample (MCMC)
+RSM_pred_splO <- RSM_pred$sample(
+  data = list(N = length(E23_BP$logOut) + nrow(grid_points),
+              Nobs = length(E23_BP$logOut),
+              x = bind_rows(E23_BP[c("Wbrc", "Strc")], grid_points),
+              z = E23_BP$logOut),
+  chains = 4, parallel_chains = 4, refresh = 500)
+
+RSM_pred_splO$save_object("RSM_pred_splO.rds")
+```
+
+### Plot predictions
+
+For Pollen_TAPS
+
+```{r}
+RSM_pred_splPT <- read_rds("RSM_pred_splPT.rds")
+
+# extract the predictors
+Fig.4.A <- RSM_pred_splPT |> 
+  tidybayes::spread_rvars(f[rownum], a) |> 
+  slice(-(1:length(E23_BP$logTAPS))) |> 
+  bind_cols(grid_points) |> 
+  mutate(logTAPS = (f + a),
+         pa_median = median(logTAPS*sdlTAPS + meanlTAPS)) |>
+  ggplot(aes(x = (Wbrc*sdWbrBP + meanWbrBP), y = (Strc*sdStrBP + meanStrBP),
+             z = exp(pa_median))) + 
+  geom_tile(aes(fill = exp(pa_median))) +
+  scale_fill_viridis_c() +
+  coord_fixed()+
+  theme_classic() + 
+  labs(fill = "Predicted trapped\npollen (g/h)",
+       x = "Brood population\n(number of brood cells)",
+       y = "Worker population\n(number of workers)",
+       tag= "A)") +
+    theme(axis.title = element_text(size = 5),
+        axis.text = element_text(size = 5),
+        legend.title = element_text(size = 5),
+        legend.text = element_text(size = 5)) + 
+  NULL
+```
+
+For Out_30s
+
+```{r}
+RSM_pred_splO <- read_rds("RSM_pred_splO.rds")
+
+# extract the predictors
+Fig.4.B <- RSM_pred_splO |> 
+  tidybayes::spread_rvars(f[rownum], a) |> 
+  slice(-(1:length(E23_BP$logOut))) |> 
+  bind_cols(grid_points) |> 
+  mutate(logOut = (f + a),
+         pa_median = median(logOut*sdlOut + meanlOut)) |> # change here
+  ggplot(aes(x = (Wbrc*sdWbrBP + meanWbrBP), y = (Strc*sdStrBP + meanStrBP),
+             z = pa_median)) + 
+  geom_tile(aes(fill = exp(pa_median))) +
+  scale_fill_viridis_c(breaks=c(0,120,125,130)) +  # Using a continuous scale from viridis package
+  coord_fixed()+
+  theme_classic() + 
+  labs(fill = "Predicted departing\nforagers (number of workers)",
+       x = "Brood population\n(number of brood cells)",
+       y = "Worker population\n(number of workers)",
+       tag= "B)") +
+    theme(axis.title = element_text(size = 5),
+        axis.text = element_text(size = 5),
+        legend.title = element_text(size = 5),
+        legend.text = element_text(size = 5)) + 
+  NULL
+```
+
+# Extracting the figures
+
+```{r}
+# 
+# tiff(filename = "./Fig_JEE/Fig.1.A.tif",
+#      plot(Fig.1.A),
+#      res = 500, # high res for : at least 300 dpi, or 600 dpi for line graphs
+#      height = 10,
+#      width = 80,
+#      units = "mm")
+# dev.off()    
+# 
+# tiff(filename = "./Fig_JEE/Fig.1.B.tif",
+#      plot(Fig.1.B),
+#      res = 500,
+#      height = 20,
+#      width = 80,
+#      units = "mm")
+# dev.off()    
+# 
+# tiff(filename = "./Fig_JEE/Fig.1.C.tif",
+#      plot(Fig.1.C),
+#      res = 500,
+#      height = 30,
+#      width = 80,
+#      units = "mm")
+# dev.off()    
+# 
+# tiff(filename = "./Fig_JEE/Fig.1.D.tif",
+#      plot(Fig.1.D),
+#      res = 500,
+#      height = 40,
+#      width = 80,
+#      units = "mm")
+# dev.off()    
+# 
+# tiff(filename = "./Fig_JEE/Fig.1.E.tif",
+#      plot(Fig.1.E),
+#      res = 500,
+#      height = 50,
+#      width = 80,
+#      units = "mm")
+# dev.off()    
+# 
+# tiff(filename = "./Fig_JEE/Fig.2.A.tif",
+#      plot(Fig.2.A),
+#      res = 500,
+#      height = 80,
+#      width = 80,
+#      units = "mm")
+# dev.off()    
+# 
+# tiff(filename = "./Fig_JEE/Fig.2.B.tif",
+#      plot(Fig.2.B),
+#      res = 500,
+#      height = 80,
+#      width = 80,
+#      units = "mm")
+# dev.off()    
+# 
+# tiff(filename = "./Fig_JEE/Fig.3.A.tif",
+#      plot(Fig.3.A),
+#      res = 500,
+#      height = 80,
+#      width = 80,
+#      units = "mm")
+# dev.off()    
+# 
+# tiff(filename = "./Fig_JEE/Fig.3.B.tif",
+#      plot(Fig.3.B),
+#      res = 500,
+#      height = 80,
+#      width = 80,
+#      units = "mm")
+# dev.off()    
+# 
+# tiff(filename = "./Fig_JEE/Fig.3.C.tif",
+#      plot(Fig.3.C),
+#      res = 500,
+#      height = 80,
+#      width = 80,
+#      units = "mm")
+# dev.off()    
+# 
+# tiff(filename = "./Fig_JEE/Fig.3.D.tif",
+#      plot(Fig.3.D),
+#      res = 500,
+#      height = 80,
+#      width = 80,
+#      units = "mm")
+# dev.off()    
+# 
+# tiff(filename = "./Fig_JEE/Fig.4.A.tif",
+#      plot(Fig.4.A),
+#      res = 500,
+#      height = 10,
+#      width = 82,
+#      units = "mm")
+# dev.off()    
+# 
+# tiff(filename = "./Fig_JEE/Fig.4.B.tif",
+#      plot(Fig.4.B),
+#      res = 500,
+#      height = 60,
+#      width = 82,
+#      units = "mm")
+# dev.off()    
+```
+
+
+# Code ChatGPT 2
+
+
+```{r}
+# Let's set up the R code for exporting your ggplots with the required specifications!
+# library(ggplot2)
+# library(extrafont)
+# 
+# # Ensure you have CMYK support
+# cairo_ps_arial <- function(filename, ...) {
+#   grDevices::cairo_ps(file = filename, family = "Arial", ...)
+# }
+# 
+# # Arial
+# extrafont::loadfonts(device = "win")
+# 
+# # Extract plot
+# ggsave("./Fig_JEE/Fig.1.A.eps", plot = Fig.1.A,
+#        "./Fig_JEE/Fig.1.B.eps", plot = Fig.1.B,
+#        "./Fig_JEE/Fig.1.C.eps", plot = Fig.1.C,
+#        "./Fig_JEE/Fig.1.D.eps", plot = Fig.1.D,
+#        "./Fig_JEE/Fig.1.E.eps", plot = Fig.1.E,
+#        ncol = 1, nrow = 5,
+#        device = cairo_ps_arial, width = 80 / 25.4, height = 60 / 25.4,
+#        dpi = 1200, units = "in")
+# 
+# ggsave("./Fig_JEE/Fig.2.A.eps", plot = Fig.2.A,
+#        "./Fig_JEE/Fig.2.B.eps", plot = Fig.2.B,
+#        ncol = 1, nrow = 2,
+#        device = cairo_ps_arial, width = 80 / 25.4, height = 60 / 25.4,
+#        dpi = 1200, units = "in")
+# 
+# 
+# ggsave("./Fig_JEE/Fig.3.A.eps", plot = Fig.3.A,
+#        "./Fig_JEE/Fig.3.B.eps", plot = Fig.3.B,
+#        "./Fig_JEE/Fig.3.C.eps", plot = Fig.3.C,
+#        "./Fig_JEE/Fig.3.D.eps", plot = Fig.3.D,
+#        ncol = 1, nrow = 4,
+#        device = cairo_ps_arial, width = 80 / 25.4, height = 60 / 25.4,
+#        dpi = 1200, units = "in")
+# 
+# ggsave("./Fig_JEE/Fig.4.A.eps", plot = Fig.4.A,
+#        "./Fig_JEE/Fig.4.B.eps", plot = Fig.4.B,
+#        ncol = 1, nrow = 2,
+#        device = cairo_ps_arial, width = 80 / 25.4, height = 60 / 25.4,
+#        dpi = 1200, units = "in")
+```
+
+
+
+# Essai 3
+
+```{r}
+library(ggplot2)
+library(patchwork)
+library(extrafont)
+
+# Fonction pour utiliser Arial avec cairo_ps
+cairo_ps_arial <- function(filename, ...) {
+  grDevices::cairo_ps(file = filename, family = "Arial", ...)
+}
+
+# Chargement des polices (nécessaire sous Windows)
+extrafont::loadfonts(device = "win")
+
+# Combining figures
+Fig1 <- Fig.1.A / Fig.1.B / Fig.1.C / Fig.1.D / Fig.1.E
+Fig2 <- Fig.2.A / Fig.2.B
+Fig3 <- Fig.3.A / Fig.3.B / Fig.3.C / Fig.3.D
+Fig4 <- Fig.4.A / Fig.4.B
+
+# List of combined figures
+figures_combined <- list(
+  "Fig1" = Fig1,
+  "Fig2" = Fig2,
+  "Fig3" = Fig3,
+)
+
+# Loop for saving each combined figures 1-3
+for (name in names(figures_combined)) {
+  ggsave(filename = paste0("./Fig_JEE/", name, ".eps"),
+         plot = figures_combined[[name]],
+         device = cairo_ps_arial,
+         width = 160, height = (5 * length(figures_combined[[name]])),
+         dpi = 1200, units = "mm")
+}
+
+# Saving 4
+"Fig4" = Fig4
+
+for (name in names(Fig4)) {
+  ggsave(filename = paste0("./Fig_JEE/Fig4.eps"),
+         plot = Fig4,
+         device = cairo_ps_arial,
+         width = 40, height = (60 * length(Fig4)),
+         dpi = 1200, units = "mm")
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
